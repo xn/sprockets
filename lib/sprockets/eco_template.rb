@@ -9,10 +9,9 @@ module Sprockets
   #   https://github.com/sstephenson/eco
   #
   class EcoTemplate < Tilt::Template
-    # Eco templates always produced compiled JS. We can set Tilt's
-    # default mime type hint.
-    def self.default_mime_type
-      'application/javascript'
+    # Check to see if Eco is loaded
+    def self.engine_initialized?
+      defined? ::Eco
     end
 
     # Autoload eco library. If the library isn't loaded, Tilt will produce

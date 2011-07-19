@@ -8,10 +8,9 @@ module Sprockets
   #   https://github.com/sstephenson/ruby-ejs
   #
   class EjsTemplate < Tilt::Template
-    # EJS templates always produced compiled JS. We can set Tilt's
-    # default mime type hint.
-    def self.default_mime_type
-      'application/javascript'
+    # Check to see if EJS is loaded
+    def self.engine_initialized?
+      defined? ::EJS
     end
 
     # Autoload ejs library. If the library isn't loaded, Tilt will produce

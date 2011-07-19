@@ -1,33 +1,20 @@
 require 'sprockets/engines'
+require 'sprockets/mime'
 require 'sprockets/processor'
 require 'sprockets/utils'
-require 'rack/mime'
 
 module Sprockets
   # `Processing` is an internal mixin whose public methods are exposed on
   # the `Environment` and `Index` classes.
   module Processing
-    include Engines
-
-    # Returns a `Hash` of registered mime types registered on the
-    # environment and those part of `Rack::Mime`.
-    #
-    # If an `ext` is given, it will lookup the mime type for that extension.
-    def mime_types(ext = nil)
-      if ext.nil?
-        Rack::Mime::MIME_TYPES.merge(@mime_types)
-      else
-        ext = Sprockets::Utils.normalize_extension(ext)
-        @mime_types[ext] || Rack::Mime::MIME_TYPES[ext]
-      end
-    end
+    include Engines, Mime
 
     # Register a new mime type.
     def register_mime_type(mime_type, ext)
+      # Overrides the global behavior to expire the index
       expire_index!
-      ext = Sprockets::Utils.normalize_extension(ext)
-      @trail.extensions << ext
-      @mime_types[ext] = mime_type
+      @trail.append_extension(ext)
+      super
     end
 
     # Returns an `Array` of format extension `String`s.
@@ -43,7 +30,7 @@ module Sprockets
     def register_engine(ext, klass)
       # Overrides the global behavior to expire the index
       expire_index!
-      @trail.extensions << ext.to_s
+      add_engine_to_trail(ext, klass)
       super
     end
 
@@ -279,32 +266,15 @@ module Sprockets
       end
     end
 
-    protected
-      def compute_digest
-        digest = super
-
-        # Add mime types to environment digest
-        digest << @mime_types.keys.join(',')
-
-        # Add engines to environment digest
-        digest << @engines.map { |e, k| "#{e}:#{k.name}" }.join(',')
-
-        # Add preprocessors to environment digest
-        digest << @preprocessors.map { |m, a| "#{m}:#{a.map(&:name)}" }.join(',')
-
-        # Add postprocessors to environment digest
-        digest << @postprocessors.map { |m, a| "#{m}:#{a.map(&:name)}" }.join(',')
-
-        # Add bundle processors to environment digest
-        digest << @bundle_processors.map { |m, a| "#{m}:#{a.map(&:name)}" }.join(',')
-
-        digest
-      end
-
     private
-      def deep_copy_hash(hash)
-        initial = Hash.new { |h, k| h[k] = [] }
-        hash.inject(initial) { |h, (k, a)| h[k] = a.dup; h }
+      def add_engine_to_trail(ext, klass)
+        @trail.append_extension(ext)
+
+        if klass.respond_to?(:default_mime_type) && klass.default_mime_type
+          if format_ext = extension_for_mime_type(klass.default_mime_type)
+            @trail.alias_extension(ext, format_ext)
+          end
+        end
       end
   end
 end

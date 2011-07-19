@@ -13,24 +13,6 @@ module Sprockets
       @pathname = path.is_a?(Pathname) ? path : Pathname.new(path.to_s)
     end
 
-    # Returns `Array` of extension `String`s.
-    #
-    #     "foo.js.coffee"
-    #     # => [".js", ".coffee"]
-    #
-    def extensions
-      @extensions ||= @pathname.basename.to_s.scan(/\.[^.]+/)
-    end
-
-    # Returns basename alone.
-    #
-    #     "foo/bar.js"
-    #     # => "bar"
-    #
-    def basename_without_extensions
-      @pathname.basename(extensions.join)
-    end
-
     # Replaces `$root` placeholder with actual environment root.
     def expand_root
       pathname.to_s.sub(/^\$root/, environment.root)
@@ -48,18 +30,42 @@ module Sprockets
         sub(/^#{Regexp.escape(environment.root)}\//, '')
     end
 
-    # Returns the index location.
-    #
-    #     "foo/bar.js"
-    #     # => "foo/bar/index.js"
-    #
-    def index_path
-      if basename_without_extensions.to_s == 'index'
-        pathname.to_s
-      else
-        basename = "#{basename_without_extensions}/index#{extensions.join}"
-        pathname.dirname.to_s == '.' ? basename : pathname.dirname.join(basename).to_s
+    # Returns paths search the load path for.
+    def search_paths
+      paths = [pathname.to_s]
+
+      if pathname.basename(extensions.join).to_s != 'index'
+        path_without_extensions = extensions.inject(pathname) { |p, ext| p.sub(ext, '') }
+        index_path = path_without_extensions.join("index#{extensions.join}").to_s
+        paths << index_path
       end
+
+      paths
+    end
+
+    # Reverse guess logical path for fully expanded path.
+    #
+    # This has some known issues. For an example if a file is
+    # shaddowed in the path, but is required relatively, its logical
+    # path will be incorrect.
+    def logical_path
+      raise ArgumentError unless pathname.absolute?
+
+      if root_path = environment.paths.detect { |path| pathname.to_s[path] }
+        path = pathname.relative_path_from(Pathname.new(root_path)).to_s
+        path = engine_extensions.inject(path) { |p, ext| p.sub(ext, '') }
+        path = "#{path}#{engine_format_extension}" unless format_extension
+        path
+      end
+    end
+
+    # Returns `Array` of extension `String`s.
+    #
+    #     "foo.js.coffee"
+    #     # => [".js", ".coffee"]
+    #
+    def extensions
+      @extensions ||= @pathname.basename.to_s.scan(/\.[^.]+/)
     end
 
     # Returns the format extension.
@@ -68,7 +74,9 @@ module Sprockets
     #     # => ".js"
     #
     def format_extension
-      extensions.detect { |ext| @environment.mime_types(ext) }
+      extensions.detect { |ext|
+        @environment.mime_types(ext) && !@environment.engines(ext)
+      }
     end
 
     # Returns an `Array` of engine extensions.
@@ -86,17 +94,6 @@ module Sprockets
       exts.select { |ext| @environment.engines(ext) }
     end
 
-    # Returns path without any engine extensions.
-    #
-    #     "foo.js.coffee.erb"
-    #     # => "foo.js"
-    #
-    def without_engine_extensions
-      engine_extensions.inject(pathname) do |p, ext|
-        p.sub(ext, '')
-      end
-    end
-
     # Returns engine classes.
     def engines
       engine_extensions.map { |ext| @environment.engines(ext) }
@@ -107,19 +104,6 @@ module Sprockets
       environment.preprocessors(content_type) +
         engines.reverse +
         environment.postprocessors(content_type)
-    end
-
-    # Returns implicit engine content type.
-    #
-    # `.coffee` files carry an implicit `application/javascript`
-    # content type.
-    def engine_content_type
-      engines.reverse.each do |engine|
-        if engine.respond_to?(:default_mime_type) && engine.default_mime_type
-          return engine.default_mime_type
-        end
-      end
-      nil
     end
 
     # Returns the content type for the pathname. Falls back to `application/octet-stream`.
@@ -157,5 +141,25 @@ module Sprockets
         pathname.dirname.to_s == '.' ? basename : pathname.dirname.join(basename).to_s
       end
     end
+
+    private
+      # Returns implicit engine content type.
+      #
+      # `.coffee` files carry an implicit `application/javascript`
+      # content type.
+      def engine_content_type
+        engines.reverse.each do |engine|
+          if engine.respond_to?(:default_mime_type) && engine.default_mime_type
+            return engine.default_mime_type
+          end
+        end
+        nil
+      end
+
+      def engine_format_extension
+        if content_type = engine_content_type
+          environment.extension_for_mime_type(content_type)
+        end
+      end
   end
 end
